@@ -33,7 +33,7 @@ class EvaluationWorker(QThread):
         super().__init__()
         self.channel_url = channel_url
         self.video_count = video_count 
-        self.api_key = 'AIzaSyBePYCfIvOmeYmyCGmWrLIRObVBk5HOJXs'
+        self.api_key = 'XXXXXXXXXXXXXXXXXXXXXXXXXXX'
         self.youtube = build('youtube', 'v3', developerKey=self.api_key)
         self.setup_nltk()
         
@@ -144,18 +144,6 @@ class EvaluationWorker(QThread):
         C_options.add_argument('--headless') 
         C_options.add_argument('--no-sandbox')
         C_options.add_argument('--disable-dev-shm-usage')
-        
-
-        #if hasattr(sys, '_MEIPASS'):
-            #base_path = sys._MEIPASS 
-        #else:
-            #base_path = os.path.dirname(os.path.abspath(__file__))
-
-        #chromedriver_path = os.path.join(base_path, 'chromedriver.exe')
-        #chrome_path = os.path.join(base_path, 'chrome-portable', 'chrome.exe')
-
-        #service = Service(chromedriver_path)
-        #C_options.binary_location = chrome_path 
 
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=C_options)
@@ -283,15 +271,10 @@ class EvaluationWorker(QThread):
 
         for comment in comments:
             try:
-                # Truncate long comments to max token length
-                #tokens = self.tokenizer.encode(comment, truncation=True, max_length=512)
-                # BERT model returns scores from 1 to 5
                 result = self.sentiment_pipeline(comment, truncation=True, max_length=512)[0]
-                # Convert 1-5 score to sentiment category
                 label = result['label']
                 score = int(label.split()[0])  # Extract numeric score
             
-                # Convert 5-point scale to sentiment categories
                 if score >= 4:
                    sentiment_counts['Positive'] += 1
                    normalized_score = 1.0
@@ -364,7 +347,6 @@ class EvaluationWorker(QThread):
         text = regex.sub(r"\b\d+(?:\s+\d+)*\b", "", text)
         # Remove emojis
         text = regex.sub(r'[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF]', '', text)
-        # Remove any characters not belonging to letters or whitespace
         # Using \p{L} to match any kind of letter from any language
         text = regex.sub(r"[^\p{L}\s]", "", text, flags=regex.UNICODE)
         # Normalize whitespace
@@ -474,9 +456,9 @@ class YouTubePartnerEstimator(QMainWindow):
         self.setMinimumSize(1000, 700)
 
         if hasattr(sys, '_MEIPASS'):
-            logo_path = os.path.join(sys._MEIPASS, 'Foreo_Logo.png')
+            logo_path = os.path.join(sys._MEIPASS, 'Logo.png')
         else:
-            logo_path = 'Foreo_Logo.png'
+            logo_path = 'Logo.png'
         
         self.setWindowIcon(QIcon(logo_path))
      
