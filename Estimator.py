@@ -1,24 +1,25 @@
 import sys
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                            QLabel, QLineEdit, QPushButton, QTableWidget,
-                           QTableWidgetItem, QMessageBox, QProgressDialog,
-                           QFrame, QHBoxLayout, QSpinBox)
+                           QTableWidgetItem, QMessageBox,
+                           QFrame, QHBoxLayout, QSpinBox,
+                           QHeaderView, QGraphicsDropShadowEffect)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QFont, QIcon
+from PyQt5.QtGui import QFont, QIcon, QColor, QBrush, QPainter, QPen
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
-from transformers import pipeline, AutoModelForSequenceClassification, AutoTokenizer
-import torch
+from transformers import pipeline
 import time
 import os 
 import regex
+import torch
 import re
 import isodate
 import numpy as np
@@ -33,25 +34,34 @@ class EvaluationWorker(QThread):
         super().__init__()
         self.channel_url = channel_url
         self.video_count = video_count 
-        self.api_key = 'XXXXXXXXXXXXXXXXXXXXXXXXXXX'
+        self.api_key = 'XXXXXXXXXXXXXXXXXXXXXXXXX'
         self.youtube = build('youtube', 'v3', developerKey=self.api_key)
         self.setup_nltk()
-        
+
 
     def setup_nltk(self):
         os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
-        self.model_name = "nlptown/bert-base-multilingual-uncased-sentiment"
+        
         try:
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            self.sentiment_model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
+            if hasattr(sys, '_MEIPASS'):
+                base_path = sys._MEIPASS
+            else:
+                base_path = os.path.dirname(os.path.abspath(__file__))
+        
+            model_path = os.path.join(base_path, "model_dir")
+            
+            if not os.path.exists(model_path):
+                self.error.emit(f"Error: Model directory not found at {model_path}")
+                return
+
             self.sentiment_pipeline = pipeline(
                 "sentiment-analysis",
-                model=self.sentiment_model,
-                tokenizer=self.tokenizer,
+                model=model_path,
                 device=0 if torch.cuda.is_available() else -1,
                 truncation=True,
                 max_length=512
             )
+            
         except Exception as e:
             print(f"Error loading multilingual model: {str(e)}")
             self.error.emit(f"Error loading multilingual model: {str(e)}")
@@ -144,6 +154,18 @@ class EvaluationWorker(QThread):
         C_options.add_argument('--headless') 
         C_options.add_argument('--no-sandbox')
         C_options.add_argument('--disable-dev-shm-usage')
+        
+
+        #if hasattr(sys, '_MEIPASS'):
+            #base_path = sys._MEIPASS 
+        #else:
+            #base_path = os.path.dirname(os.path.abspath(__file__))
+
+        #chromedriver_path = os.path.join(base_path, 'chromedriver.exe')
+        #chrome_path = os.path.join(base_path, 'chrome-portable', 'chrome.exe')
+
+        #service = Service(chromedriver_path)
+        #C_options.binary_location = chrome_path 
 
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=C_options)
@@ -262,6 +284,7 @@ class EvaluationWorker(QThread):
         else:
             raise ValueError(f"Could not find a channel for custom name: {custom_name}")
     
+
     def analyze_sentiment(self, comments):
         if not comments:
             return 0, {'Positive': 0, 'Negative': 0, 'Neutral': 0}
@@ -271,10 +294,15 @@ class EvaluationWorker(QThread):
 
         for comment in comments:
             try:
+                # Truncate long comments to max token length
+                #tokens = self.tokenizer.encode(comment, truncation=True, max_length=512)
+                # BERT model returns scores from 1 to 5
                 result = self.sentiment_pipeline(comment, truncation=True, max_length=512)[0]
+                # Convert 1-5 score to sentiment category
                 label = result['label']
                 score = int(label.split()[0])  # Extract numeric score
             
+                # Convert 5-point scale to sentiment categories
                 if score >= 4:
                    sentiment_counts['Positive'] += 1
                    normalized_score = 1.0
@@ -347,6 +375,7 @@ class EvaluationWorker(QThread):
         text = regex.sub(r"\b\d+(?:\s+\d+)*\b", "", text)
         # Remove emojis
         text = regex.sub(r'[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF]', '', text)
+        # Remove any characters not belonging to letters or whitespace
         # Using \p{L} to match any kind of letter from any language
         text = regex.sub(r"[^\p{L}\s]", "", text, flags=regex.UNICODE)
         # Normalize whitespace
@@ -361,7 +390,7 @@ class EvaluationWorker(QThread):
         else:
             return None
 
-    def evaluate_channel(self, channel_id, video_count, target_language='en'):
+    def evaluate_channel(self, channel_id, video_count):
         videos = self.get_channel_videos(channel_id, video_count)
         sponsored_sentiments = []
         unsponsored_sentiments = []
@@ -438,172 +467,210 @@ class EvaluationWorker(QThread):
 
 
 class ModernFrame(QFrame):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, shadow_strength=3):
         super().__init__(parent)
         self.setObjectName("modernFrame")
         self.setStyleSheet("""
             QFrame#modernFrame {
                 background-color: white;
-                border-radius: 10px;
-                border: 1px solid #e0e0e0;
+                border-radius: 12px;
+                border: none;
             }
         """)
+        
+        # Add drop shadow effect
+        if shadow_strength > 0:
+            shadow = QGraphicsDropShadowEffect()
+            shadow.setBlurRadius(15)
+            shadow.setColor(QColor(0, 0, 0, 25))
+            shadow.setOffset(0, 3)
+            self.setGraphicsEffect(shadow)
 
+
+# Circular progress indicator (for visual flair during loading)
+class CircularProgressIndicator(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(40, 40)
+        self.angle = 0
+        self.timer = self.startTimer(30)
+        
+    def timerEvent(self, event):
+        self.angle = (self.angle + 5) % 360
+        self.update()
+        
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        pen = QPen()
+        pen.setWidth(3)
+        pen.setColor(QColor("#2834bd"))
+        painter.setPen(pen)
+        
+        rect = self.rect().adjusted(5, 5, -5, -5)
+        painter.drawArc(rect, self.angle * 16, 120 * 16)
+
+
+# Modern, flat-styled progress dialog
+class ModernProgressDialog(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setFixedSize(400, 180)
+        
+        layout = QVBoxLayout(self)
+        
+        # Content frame with shadow
+        frame = ModernFrame(self)
+        frame_layout = QVBoxLayout(frame)
+        frame_layout.setContentsMargins(30, 30, 30, 30)
+        
+        # Progress indicator and message in horizontal layout
+        progress_layout = QHBoxLayout()
+        self.indicator = CircularProgressIndicator()
+        self.message_label = QLabel("Evaluating channel...")
+        self.message_label.setStyleSheet("font-size: 14px; color: #333333;")
+        
+        progress_layout.addWidget(self.indicator, 0, Qt.AlignCenter)
+        progress_layout.addWidget(self.message_label, 1, Qt.AlignCenter)
+        
+        # Cancel button
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setStyleSheet("""
+            QPushButton {
+                background-color: #f0f0f0;
+                color: #333333;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background-color: #e0e0e0;
+            }
+            QPushButton:pressed {
+                background-color: #d0d0d0;
+            }
+        """)
+        
+        frame_layout.addLayout(progress_layout)
+        frame_layout.addWidget(self.cancel_button, 0, Qt.AlignCenter)
+        
+        layout.addWidget(frame)
+        
+    def set_message(self, message):
+        self.message_label.setText(message)
+        
+    def center_on_parent(self, parent):
+        if parent:
+            parent_geo = parent.geometry()
+            x = parent_geo.x() + (parent_geo.width() - self.width()) // 2
+            y = parent_geo.y() + (parent_geo.height() - self.height()) // 2
+            self.move(x, y)
+
+
+# Modern styled QLineEdit with built-in clear button
+class ModernLineEdit(QLineEdit):
+    def __init__(self, placeholder_text="", parent=None):
+        super().__init__(parent)
+        self.setPlaceholderText(placeholder_text)
+        self.setStyleSheet("""
+            QLineEdit {
+                padding: 12px 12px 12px 15px;
+                border: 2px solid #e0e0e0;
+                border-radius: 8px;
+                background-color: white;
+                font-size: 14px;
+                min-width: 300px;
+                min-height: 24px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #2834bd;
+            }
+        """)
+        
+        # Add clear button
+        self.setClearButtonEnabled(True)
+
+
+# Main application window with redesigned UI
 class YouTubePartnerEstimator(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("YouTube Partner Estimator")
-        self.setMinimumSize(1000, 700)
+        self.setMinimumSize(1200, 900)
 
+        # Load logo
         if hasattr(sys, '_MEIPASS'):
-            logo_path = os.path.join(sys._MEIPASS, 'Logo.png')
+            logo_path = os.path.join(sys._MEIPASS, 'MLogo.png')
         else:
-            logo_path = 'Logo.png'
+            logo_path = 'MLogo.png'
         
         self.setWindowIcon(QIcon(logo_path))
-     
+        
+        # Set the application-wide stylesheet
         self.setStyleSheet("""
             QMainWindow {
-                background-color: #f5f5f5;
+                background-color: #f7f8fc;
             }
             QLabel {
                 color: #333333;
             }
-            QLineEdit {
-                padding: 12px;
-                border: 2px solid #e0e0e0;
-                border-radius: 6px;
-                background-color: white;
-                font-size: 14px;
-            }
-            QLineEdit:focus {
-                border: 2px solid #f11c87;
-            }
             QPushButton#evaluateButton {
-                background-color: #f11c87;
+                background-color: #2834bd;
                 color: white;
                 border: none;
-                border-radius: 6px;
+                border-radius: 8px;
                 padding: 12px;
                 font-size: 14px;
                 font-weight: bold;
+                min-height: 24px;
             }
             QPushButton#evaluateButton:hover {
-                background-color: #f00c68;
+                background-color: #3a46d8;
+            }
+            QPushButton#evaluateButton:pressed {
+                background-color: #1a26a5;
             }
             QPushButton#evaluateButton:disabled {
                 background-color: #BDBDBD;
             }
             QTableWidget {
                 background-color: white;
-                border: 1px solid #e0e0e0;
-                border-radius: 6px;
+                border: none;
+                border-radius: 8px;
                 gridline-color: #f5f5f5;
+                selection-background-color: #e8eeff;
+                selection-color: #2834bd;
             }
             QTableWidget::item {
-                padding: 8px;
+                padding: 10px;
+                border-bottom: 1px solid #f0f0f0;
+            }
+            QTableWidget::item:selected {
+                background-color: #e8eeff;
+                color: #2834bd;
             }
             QHeaderView::section {
-                background-color: #f5f5f5;
-                padding: 8px;
+                background-color: #f0f2fa;
+                padding: 12px;
                 border: none;
                 font-weight: bold;
+                color: #2834bd;
             }
-            QProgressDialog {
-                background-color: white;
-                border-radius: 6px;
-            }
-            QProgressDialog QLabel {
-                color: #333333;
-                font-size: 14px;
-            }
-            QProgressBar {
-                border: 2px solid #e0e0e0;
-                border-radius: 8px;
-                text-align: center;
-                font-size: 14px;
-                background-color: #f5f5f5;
-                color: #333333;
-            }
-            QProgressBar::chunk {
-                background-color: #f11c87; /* Pink gradient for modern look */
-                border-radius: 8px;
-            }
-        """)
-        self.setup_ui()
-
-    def setup_ui(self):
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setSpacing(20)
-        main_layout.setContentsMargins(30, 30, 30, 30)
-
-        header_frame = ModernFrame()
-        header_layout = QVBoxLayout(header_frame)
-        
-        title_label = QLabel("YouTube Partner Estimator")
-        title_label.setStyleSheet("""
-            font-size: 32px;
-            font-weight: bold;
-            color: #f11c87;
-            margin: 20px;
-        """)
-        title_label.setAlignment(Qt.AlignCenter)
-        
-        subtitle_label = QLabel("Analyze YouTube channels for partnership potential")
-        subtitle_label.setStyleSheet("""
-            font-size: 16px;
-            color: #757575;
-        """)
-        subtitle_label.setAlignment(Qt.AlignCenter)
-        
-        header_layout.addWidget(title_label)
-        header_layout.addWidget(subtitle_label)
-        main_layout.addWidget(header_frame)
-
-        # Input section
-        input_frame = ModernFrame()
-        input_layout = QHBoxLayout(input_frame)
-        input_layout.setSpacing(15)
-
-        self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("Enter YouTube Channel URL")
-        self.url_input.setStyleSheet("""
-            QLineEdit {
-                padding: 12px;
-                border: 2px solid #e0e0e0;
-                border-radius: 6px;
-                background-color: white;
-                font-size: 14px;
-                min-width: 300px;
-            }
-            QLineEdit:focus {
-                border: 2px solid #f11c87;
-            }
-        """)
-
-
-        self.evaluate_button = QPushButton("Evaluate Channel")
-        self.evaluate_button.setObjectName("evaluateButton")
-        self.evaluate_button.setFixedWidth(200)
-        self.evaluate_button.clicked.connect(self.start_evaluation)
-
-        self.video_count_spinner = QSpinBox()
-        self.video_count_spinner.setRange(2, 50)
-        self.video_count_spinner.setValue(4)
-        self.video_count_spinner.setStyleSheet("""
             QSpinBox {
                 padding: 12px;
                 border: 2px solid #e0e0e0;
-                
-                border-radius: 6px;
+                border-radius: 8px;
                 background-color: white;
                 font-size: 14px;
                 min-width: 80px;
+                min-height: 24px;
             }
             QSpinBox:focus {
-                border: 2px solid #f11c87;
+                border: 2px solid #2834bd;
             }
             QSpinBox::up-button, QSpinBox::down-button {
                 width: 20px;
@@ -613,61 +680,149 @@ class YouTubePartnerEstimator(QMainWindow):
             QSpinBox::up-button:hover, QSpinBox::down-button:hover {
                 background-color: #f5f5f5;
             }
-            QSpinBox::up-arrow {
-                image: url(arrow.svg);
-                width: 10px;
-                height: 10px;
-            }
-            QSpinBox::down-arrow {
-                image: url(down.svg);
-                width: 10px;
-                height: 10px;
-            }
         """)
         
-        input_layout.addWidget(self.url_input)
+        self.setup_ui()
+
+    def setup_ui(self):
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setSpacing(25)
+        main_layout.setContentsMargins(40, 40, 40, 40)
+
+        # Header section with gradient background
+        header_frame = QFrame()
+        header_frame.setObjectName("headerFrame")
+        header_frame.setStyleSheet("""
+            QFrame#headerFrame {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #2834bd, stop:1 #4f57d6);
+                border-radius: 12px;
+            }
+        """)
+        header_layout = QVBoxLayout(header_frame)
+        header_layout.setContentsMargins(30, 25, 30, 25)
+        
+        title_label = QLabel("YouTube Partner Estimator")
+        title_label.setStyleSheet("""
+            font-size: 32px;
+            font-weight: bold;
+            color: white;
+        """)
+        title_label.setAlignment(Qt.AlignCenter)
+        
+        subtitle_label = QLabel("Analyze YouTube channels for partnership potential")
+        subtitle_label.setStyleSheet("""
+            font-size: 16px;
+            color: rgba(255, 255, 255, 0.9);
+        """)
+        subtitle_label.setAlignment(Qt.AlignCenter)
+        
+        header_layout.addWidget(title_label)
+        header_layout.addWidget(subtitle_label)
+        main_layout.addWidget(header_frame)
+
+        # Input section with improved styling
+        input_frame = ModernFrame()
+        input_layout = QHBoxLayout(input_frame)
+        input_layout.setSpacing(15)
+        input_layout.setContentsMargins(30, 30, 30, 30)
+
+        # Channel URL input with label
+        url_label = QLabel("Channel URL:")
+        url_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        self.url_input = ModernLineEdit("Enter YouTube Channel URL")
+        
+        # Video count selection with label
+        count_label = QLabel("Videos to analyze:")
+        count_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        
+        self.video_count_spinner = QSpinBox()
+        self.video_count_spinner.setRange(2, 50)
+        self.video_count_spinner.setValue(4)
+        self.video_count_spinner.setStyleSheet("""
+            QSpinBox {
+                padding: 12px;
+                border: 2px solid #e0e0e0;
+                border-radius: 8px;
+                background-color: white;
+                font-size: 14px;
+            }
+        """)
+
+        # Evaluate button
+        self.evaluate_button = QPushButton("Evaluate Channel")
+        self.evaluate_button.setObjectName("evaluateButton")
+        self.evaluate_button.setFixedWidth(200)
+        self.evaluate_button.clicked.connect(self.start_evaluation)
+
+        # Add all components to the same horizontal layout
+        input_layout.addWidget(url_label)
+        input_layout.addWidget(self.url_input, 1)  # Give URL input more stretch
+        input_layout.addWidget(count_label)
         input_layout.addWidget(self.video_count_spinner)
         input_layout.addWidget(self.evaluate_button)
 
         main_layout.addWidget(input_frame)
 
-        # Results section
+        # Results section with tabs for different data views
         results_frame = ModernFrame()
         results_layout = QVBoxLayout(results_frame)
+        results_layout.setContentsMargins(30, 30, 30, 30)
         
-        # Results table
+        # Results heading
+        results_header = QLabel("Analysis Results")
+        results_header.setStyleSheet("""
+            font-size: 18px;
+            font-weight: bold;
+            color: #2834bd;
+            margin-bottom: 15px;
+        """)
+        results_layout.addWidget(results_header)
+        
+        # Results table with improved styling
         self.results_table = QTableWidget()
         self.results_table.setColumnCount(2)
         self.results_table.setHorizontalHeaderLabels(['Metric', 'Value'])
+        
+        # Configure table appearance
         self.results_table.horizontalHeader().setStretchLastSection(True)
+        self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.results_table.setAlternatingRowColors(True)
         self.results_table.verticalHeader().setVisible(False)
         self.results_table.setShowGrid(False)
+        self.results_table.setSelectionBehavior(QTableWidget.SelectRows)
         
         results_layout.addWidget(self.results_table)
-        main_layout.addWidget(results_frame)
+        main_layout.addWidget(results_frame, 1)  # Give this widget more stretch
 
-        # Recommendation section
+        # Recommendation section with card-like appearance
         recommendation_frame = ModernFrame()
         recommendation_layout = QVBoxLayout(recommendation_frame)
+        recommendation_layout.setContentsMargins(30, 25, 30, 25)
         
-        self.recommendation_label = QLabel()
-        self.recommendation_label.setAlignment(Qt.AlignCenter)
-        self.recommendation_label.setStyleSheet("""
+        recommendation_header = QLabel("Partnership Recommendation")
+        recommendation_header.setStyleSheet("""
             font-size: 16px;
-            padding: 20px;
-            border-radius: 6px;
+            font-weight: bold;
+            color: #2834bd;
         """)
         
+        self.recommendation_label = QLabel("Enter a YouTube channel URL and click 'Evaluate Channel' to get a recommendation")
+        self.recommendation_label.setAlignment(Qt.AlignCenter)
+        self.recommendation_label.setStyleSheet("""
+            font-size: 15px;
+            padding: 20px;
+            border-radius: 8px;
+            background-color: #f0f2fa;
+            color: #666666;
+        """)
+        self.recommendation_label.setWordWrap(True)
+        
+        recommendation_layout.addWidget(recommendation_header)
         recommendation_layout.addWidget(self.recommendation_label)
         main_layout.addWidget(recommendation_frame)
-
-        # Set stretch factors
-        main_layout.setStretch(0, 0)  # Header
-        main_layout.setStretch(1, 0)  # Input
-        main_layout.setStretch(2, 1)  # Results
-        main_layout.setStretch(3, 0)  # Recommendation
-
 
     def start_evaluation(self):
         channel_url = self.url_input.text().strip()
@@ -676,7 +831,6 @@ class YouTubePartnerEstimator(QMainWindow):
             return
 
         video_count = self.video_count_spinner.value()
-
         self.evaluate_button.setEnabled(False)
         self.worker = EvaluationWorker(channel_url, video_count)
         self.worker.finished.connect(self.handle_results)
@@ -684,29 +838,18 @@ class YouTubePartnerEstimator(QMainWindow):
         self.worker.error.connect(self.handle_error)
         self.worker.start()
 
-        self.progress_dialog = QProgressDialog("Evaluating channel...", "Cancel", 0, 0, self)
-        self.progress_dialog.setWindowTitle("Analysis in Progress")
-        self.progress_dialog.setWindowModality(Qt.WindowModal)
-        self.progress_dialog.setStyleSheet("""
-            QProgressDialog {
-                background-color: white;
-                border-radius: 10px;
-                min-width: 400px;
-            }
-            QLabel {
-                color: #333333;
-                font-size: 14px;
-                padding: 10px;
-            }
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-            }
-        """)
+        # Create and show modern progress dialog
+        self.progress_dialog = ModernProgressDialog(self)
+        self.progress_dialog.cancel_button.clicked.connect(self.cancel_evaluation)
+        self.progress_dialog.center_on_parent(self)
         self.progress_dialog.show()
+
+    def cancel_evaluation(self):
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            self.worker.terminate()
+            self.worker.wait()
+            self.evaluate_button.setEnabled(True)
+            self.progress_dialog.close()
 
     def show_error_message(self, message):
         error_dialog = QMessageBox(self)
@@ -716,6 +859,11 @@ class YouTubePartnerEstimator(QMainWindow):
         error_dialog.setStyleSheet("""
             QMessageBox {
                 background-color: white;
+                border-radius: 8px;
+            }
+            QLabel {
+                color: #333333;
+                min-width: 300px;
             }
             QPushButton {
                 background-color: #f44336;
@@ -725,68 +873,110 @@ class YouTubePartnerEstimator(QMainWindow):
                 padding: 8px 16px;
                 min-width: 80px;
             }
+            QPushButton:hover {
+                background-color: #d32f2f;
+            }
         """)
         error_dialog.exec_()
 
     def handle_error(self, error_message):
-        self.progress_dialog.hide()
+        if hasattr(self, 'progress_dialog'):
+            self.progress_dialog.close()
         self.evaluate_button.setEnabled(True)
         self.show_error_message(error_message)
 
     def update_progress(self, message):
-        self.progress_dialog.setLabelText(message)
+        if hasattr(self, 'progress_dialog'):
+            self.progress_dialog.set_message(message)
 
     def handle_results(self, results):
-        self.progress_dialog.hide()
+        if hasattr(self, 'progress_dialog'):
+            self.progress_dialog.close()
         self.evaluate_button.setEnabled(True)
 
         # Clear and update results table
         self.results_table.setRowCount(0)
-        metrics = [
-            ('Channel Name', results['channel_name']),
-            ('Channel ID', results['channel_id']),
-            ('Sponsored Content Score', f"{results['sponsored_score']:.4f}"),
-            ('Organic Content Score', f"{results['unsponsored_score']:.4f}"),
-            ('Sponsored Videos Analyzed', str(results['num_sponsored'])),
-            ('Organic Videos Analyzed', str(results['num_unsponsored'])),
-            ('Sponsored Sentiment Score', str(results['Sponsored_Sentiment_Score'])),
-            ('Unsponsored Sentiment Score',str(results['Unsponsored_Sentiment_Score'])),
-            ('Sponsored Engagement Score', str(results['Sponsored_Engagement_Score'])),
-            ('Unsponsored Engagement Score', str(results['Unsponsored_Engagement_Score'])),
-            ('Sponsored Positive Comments', str(results['sponsored_positive_comments'])),
-            ('Sponsored Negative Comments', str(results['sponsored_negative_comments'])),
-            ('Sponsored Neutral Comments', str(results['sponsored_neutral_comments'])),
-            ('Organic Positive Comments', str(results['unsponsored_positive_comments'])),
-            ('Organic Negative Comments', str(results['unsponsored_negative_comments'])),
-            ('Organic Neutral Comments', str(results['unsponsored_neutral_comments']))
-        ]
-
-        self.results_table.setRowCount(len(metrics))
-        for i, (metric, value) in enumerate(metrics):
-            self.results_table.setItem(i, 0, QTableWidgetItem(metric))
-            self.results_table.setItem(i, 1, QTableWidgetItem(str(value)))
+        
+        # Group metrics for better organization
+        metrics_groups = {
+            "Channel Information": [
+                ('Channel Name', results['channel_name']),
+                ('Channel ID', results['channel_id'])
+            ],
+            "Performance Scores": [
+                ('Sponsored Content Score', f"{results['sponsored_score']:.4f}"),
+                ('Organic Content Score', f"{results['unsponsored_score']:.4f}")
+            ],
+            "Video Analysis": [
+                ('Sponsored Videos Analyzed', str(results['num_sponsored'])),
+                ('Organic Videos Analyzed', str(results['num_unsponsored']))
+            ],
+            "Sentiment Analysis": [
+                ('Sponsored Sentiment Score', f"{results['Sponsored_Sentiment_Score']:.4f}"),
+                ('Organic Sentiment Score', f"{results['Unsponsored_Sentiment_Score']:.4f}")
+            ],
+            "Engagement Metrics": [
+                ('Sponsored Engagement Score', f"{results['Sponsored_Engagement_Score']:.4f}"),
+                ('Organic Engagement Score', f"{results['Unsponsored_Engagement_Score']:.4f}")
+            ],
+            "Comment Analysis (Sponsored)": [
+                ('Positive Comments', str(results['sponsored_positive_comments'])),
+                ('Negative Comments', str(results['sponsored_negative_comments'])),
+                ('Neutral Comments', str(results['sponsored_neutral_comments']))
+            ],
+            "Comment Analysis (Organic)": [
+                ('Positive Comments', str(results['unsponsored_positive_comments'])),
+                ('Negative Comments', str(results['unsponsored_negative_comments'])),
+                ('Neutral Comments', str(results['unsponsored_neutral_comments']))
+            ]
+        }
+        
+        # Flatten the grouped metrics for display
+        all_metrics = []
+        for group, metrics in metrics_groups.items():
+            all_metrics.append((f"--- {group} ---", ""))
+            all_metrics.extend(metrics)
+        
+        # Populate the table
+        self.results_table.setRowCount(len(all_metrics))
+        for i, (metric, value) in enumerate(all_metrics):
+            metric_item = QTableWidgetItem(metric)
+            value_item = QTableWidgetItem(str(value))
+            
+            # Style group headers differently
+            if metric.startswith("---"):
+                metric_item.setBackground(QColor("#f0f2fa"))
+                metric_item.setForeground(QBrush(QColor("#2834bd")))
+                metric_item.setFont(QFont("Segoe UI", 10, QFont.Bold))
+                value_item.setBackground(QColor("#f0f2fa"))
+            
+            self.results_table.setItem(i, 0, metric_item)
+            self.results_table.setItem(i, 1, value_item)
 
         # Update recommendation with modern styling
         if results['sponsored_score'] > results['unsponsored_score']:
-            self.recommendation_label.setText("✨ This channel shows strong potential for sponsored partnerships! ✨")
+            self.recommendation_label.setText("✨ This channel shows strong potential for sponsored partnerships! The sponsored content performs well with positive audience engagement and sentiment.")
             self.recommendation_label.setStyleSheet("""
-                background-color: #E8F5E9;
-                color: #2E7D32;
-                font-size: 16px;
-                font-weight: bold;
+                background-color: #e8f5e9;
+                color: #2e7d32;
+                font-size: 15px;
+                font-weight: 500;
                 padding: 20px;
-                border-radius: 6px;
+                border-radius: 8px;
+                border-left: 4px solid #4caf50;
             """)  
         else:
-            self.recommendation_label.setText("⚠️ This channel may need improvement before pursuing sponsored partnerships")
+            self.recommendation_label.setText("⚠️ This channel may need improvement before pursuing sponsored partnerships. The organic content currently outperforms sponsored content in terms of engagement and sentiment.")
             self.recommendation_label.setStyleSheet("""
-                background-color: #FFEBEE;
-                color: #C62828;
-                font-size: 16px;
-                font-weight: bold;
+                background-color: #fff8e1;
+                color: #f57c00;
+                font-size: 15px;
+                font-weight: 500;
                 padding: 20px;
-                border-radius: 6px;
+                border-radius: 8px;
+                border-left: 4px solid #ff9800;
             """)
+
 
 def main():
     app = QApplication(sys.argv)
