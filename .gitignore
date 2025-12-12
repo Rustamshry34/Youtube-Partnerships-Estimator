@@ -1,0 +1,52 @@
+```
+# Build artifacts
+build/
+dist/
+*.apk
+*.aab
+*.ipa
+
+# Dependencies
+.buildozer/
+.eggs/
+pip-wheel-metadata/
+
+# Logs and temp files
+*.log
+*.tmp
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Coverage
+.coverage
+coverage/
+htmlcov/
+
+# MyPy
+.mypy_cache/
+
+# PyTest
+.pytest_cache/
+
+# Mobile specific
+*.mobileprovision
+*.keystore
+*.jks
+```
